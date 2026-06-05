@@ -155,13 +155,14 @@ async function handleSubmit(event) {
   const form = event.target;
   if (!(form instanceof HTMLFormElement)) return;
   event.preventDefault();
+  const formId = form.getAttribute("id");
 
-  if (form.id === "setup-form") await saveSetup(form);
-  if (form.id === "weekly-log-form") await saveWeeklyLog(form);
-  if (form.id === "sensor-form") await saveSensor(form);
-  if (form.id === "sensor-import-form") await importSensors(form);
-  if (form.id === "cost-form") await saveCost(form);
-  if (form.id === "reminder-form") await saveReminder(form);
+  if (formId === "setup-form") await saveSetup(form);
+  if (formId === "weekly-log-form") await saveWeeklyLog(form);
+  if (formId === "sensor-form") await saveSensor(form);
+  if (formId === "sensor-import-form") await importSensors(form);
+  if (formId === "cost-form") await saveCost(form);
+  if (formId === "reminder-form") await saveReminder(form);
 }
 
 async function handleChange(event) {
