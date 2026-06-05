@@ -1,0 +1,32 @@
+GitHub Pages upload steps for HydroCheck PH Free V3
+
+1. Go to https://github.com/new
+2. Repository name: hydrocheck-ph-free-v3
+3. Set visibility to Public for free GitHub Pages hosting.
+4. Do not add a README, .gitignore, or license on the create page.
+5. Create repository.
+6. Click "uploading an existing file".
+7. Open this folder:
+   B:\PERSONAL\HYDROPONICS\hydrocheck-ph-free-v3-github-pages-upload
+8. Select all files and folders inside this folder, then drag them to GitHub:
+   .nojekyll
+   index.html
+   styles.css
+   manifest.webmanifest
+   service-worker.js
+   README.md
+   icons
+   src
+9. Commit the upload.
+10. Go to Settings > Pages.
+11. Source: Deploy from a branch.
+12. Branch: main, folder: / root.
+13. Save.
+
+Your app URL will usually be:
+https://YOUR-GITHUB-USERNAME.github.io/hydrocheck-ph-free-v3/
+
+Open that URL in Android Chrome, tap the three-dot menu, then choose
+"Add to Home screen" or "Install app".
+
+Your farm records are saved on your phone/browser. GitHub only hosts the app code.
