@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#247a4a" />
+  <meta name="description" content="HydroCheck PH monitoring app for hydroponic setups and daily logs." />
+  <title>HydroCheck PH</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="vendor/dexie.js"></script>
+  <script src="vendor/chart.umd.js"></script>
+</head>
+<body>
+  <header>
+    <h1>HydroCheck PH</h1>
+    <button id="install-btn" class="header-btn" type="button" hidden>Install App</button>
+  </header>
+  <main>
+    <!-- Section listing all setups -->
+    <section id="setup-section">
+      <h2>Setups</h2>
+      <ul id="setups-list" class="list"></ul>
+      <button id="add-setup-btn" class="primary-btn">Add Setup</button>
+
+      <!-- Setup form modal -->
+      <div id="setup-form-container" class="modal hidden">
+        <div class="modal-content">
+          <h3 id="setup-form-title">Add Setup</h3>
+          <form id="setup-form">
+            <label>
+              Name:
+              <input type="text" id="setup-name" required />
+            </label>
+            <label>
+              Crop:
+              <input type="text" id="setup-crop" />
+            </label>
+            <label>
+              System type:
+              <select id="setup-system-type">
+                <option value="NFT">NFT</option>
+                <option value="Kratky">Kratky</option>
+                <option value="DWC">DWC</option>
+                <option value="Dutch Bucket">Dutch Bucket</option>
+                <option value="Other">Other</option>
+              </select>
+            </label>
+            <label>
+              Tank capacity (L):
+              <input type="number" id="setup-capacity" min="0" step="0.1" />
+            </label>
+            <label>
+              TDS scale:
+              <select id="setup-tds-scale">
+                <option value="500">500&nbsp;ppm</option>
+                <option value="700">700&nbsp;ppm</option>
+                <option value="650">650&nbsp;ppm</option>
+              </select>
+            </label>
+            <label>
+              Target pH min:
+              <input type="number" id="setup-ph-min" min="0" max="14" step="0.1" />
+            </label>
+            <label>
+              Target pH max:
+              <input type="number" id="setup-ph-max" min="0" max="14" step="0.1" />
+            </label>
+            <label>
+              Target EC min (mS/cm):
+              <input type="number" id="setup-ec-min" min="0" step="0.1" />
+            </label>
+            <label>
+              Target EC max (mS/cm):
+              <input type="number" id="setup-ec-max" min="0" step="0.1" />
+            </label>
+            <label>
+              Target temp min (°C):
+              <input type="number" id="setup-temp-min" min="0" step="0.1" />
+            </label>
+            <label>
+              Target temp max (°C):
+              <input type="number" id="setup-temp-max" min="0" step="0.1" />
+            </label>
+            <label>
+              Nutrient formula:
+              <input type="text" id="setup-nutrient" />
+            </label>
+            <div class="actions">
+              <button type="submit" class="primary-btn">Save</button>
+              <button type="button" id="cancel-setup-btn" class="secondary-btn">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section showing details for a selected setup -->
+    <section id="details-section" class="hidden">
+      <button id="back-btn" class="secondary-btn">← Back</button>
+      <h2 id="details-title"></h2>
+      <div id="setup-info" class="info"></div>
+      <h3>Logs</h3>
+      <table id="logs-table" class="table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Vol (L)</th>
+            <th>pH</th>
+            <th>EC (mS/cm)</th>
+            <th>Temp (°C)</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <button id="add-log-btn" class="primary-btn">Add Log</button>
+      <!-- Log form modal -->
+      <div id="log-form-container" class="modal hidden">
+        <div class="modal-content">
+          <h3>Add Log</h3>
+          <form id="log-form">
+            <label>
+              Date:
+              <input type="date" id="log-date" required />
+            </label>
+            <label>
+              Water volume (L):
+              <input type="number" id="log-volume" min="0" step="0.1" />
+            </label>
+            <label>
+              pH:
+              <input type="number" id="log-ph" min="0" max="14" step="0.01" />
+            </label>
+            <label>
+              TDS (ppm):
+              <input type="number" id="log-tds" min="0" step="1" />
+            </label>
+            <label>
+              Water temperature (°C):
+              <input type="number" id="log-temp" min="0" step="0.1" />
+            </label>
+            <label>
+              Root color:
+              <select id="log-root-color">
+                <option value="">Unknown</option>
+                <option value="white">White/Cream</option>
+                <option value="light-brown">Light brown</option>
+                <option value="brown">Brown/Black</option>
+              </select>
+            </label>
+            <label>
+              Root smell:
+              <select id="log-root-smell">
+                <option value="">Unknown</option>
+                <option value="none">None</option>
+                <option value="slight">Slight</option>
+                <option value="foul">Foul</option>
+              </select>
+            </label>
+            <label>
+              Algae level:
+              <select id="log-algae">
+                <option value="none">None</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label>
+              Pest signs:
+              <input type="text" id="log-pests" placeholder="e.g. aphids, mites" />
+            </label>
+            <label>
+              Symptoms:
+              <textarea id="log-symptoms" rows="2"></textarea>
+            </label>
+            <label>
+              Actions taken:
+              <textarea id="log-actions" rows="2"></textarea>
+            </label>
+            <label>
+              Notes:
+              <textarea id="log-notes" rows="2"></textarea>
+            </label>
+            <div class="actions">
+              <button type="submit" class="primary-btn">Save</button>
+              <button type="button" id="cancel-log-btn" class="secondary-btn">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <!-- Chart containers -->
+      <h3>Trends</h3>
+      <canvas id="ph-chart"></canvas>
+      <canvas id="ec-chart"></canvas>
+      <canvas id="temp-chart"></canvas>
+      <button id="export-btn" class="secondary-btn" style="margin-top:1rem">Export CSV</button>
+    </section>
+  </main>
+  <!-- Main app script -->
+  <script src="app.js"></script>
+</body>
+</html>
