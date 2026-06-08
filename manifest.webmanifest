@@ -1,7 +1,7 @@
 {
   "name": "HydroCheck PH Free V3",
   "short_name": "HydroCheck",
-  "description": "Offline hydroponics monitoring for Android with recommendations, sensors, costing, and free backup sync.",
+  "description": "Offline hydroponics monitoring with plant photos, readings, recommendations, sensors, and backup sync.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

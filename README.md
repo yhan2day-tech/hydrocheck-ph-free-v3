@@ -5,11 +5,11 @@ HydroCheck PH Free V3 is a no-cost, offline-first hydroponics monitoring PWA for
 ## What is included
 
 - Five starter hydroponics setups
-- Weekly logs for water volume, pH, TDS, computed EC, water temperature, roots, pests, symptoms, harvest, sales, and photos
+- Weekly logs for water volume, pH, TDS, computed EC, water temperature, roots, pests, symptoms, notes, and plant photos
 - Rule-based corrective recommendations
+- Android sharing of the latest plant photo and readings for visual diagnosis in ChatGPT
 - Sensor readings by manual entry or CSV import
 - Reminders and browser notifications while the app is allowed to run
-- Costing by setup, with harvest revenue, cost/kg, and profit
 - JSON backup/restore and CSV exports
 - PWA manifest and service worker for Android installation
 
@@ -43,7 +43,7 @@ This keeps the Version 3 feature direction without paid services:
 - Sensors: use manual meter entry or CSV import from ESP32/Arduino logs.
 - Automation: reminders and notifications are local browser features.
 - Cloud sync: export a JSON backup, then share it to Google Drive, OneDrive, email, or Messenger.
-- Financial costing: stored locally per setup with harvest revenue from weekly logs.
+- Plant photos and readings stay on the phone until the user chooses to share them.
 
 No API key, paid AI, paid database, or paid hosting is required.
 
@@ -60,7 +60,7 @@ The app converts TDS to EC when the setup has a 500 or 700 meter scale.
 
 - `index.html` - app shell
 - `src/app.js` - UI and browser workflow
-- `src/core.js` - EC conversion, recommendation rules, costing, exports
+- `src/core.js` - EC conversion, recommendation rules, and exports
 - `src/storage.js` - IndexedDB storage with localStorage fallback
 - `service-worker.js` - offline cache
 - `manifest.webmanifest` - install metadata

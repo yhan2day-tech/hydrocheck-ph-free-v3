@@ -1,4 +1,4 @@
-export const APP_VERSION = "3.0.0-free";
+export const APP_VERSION = "3.1.0-free";
 
 export const SEVERITY_SCORE = {
   Good: 0,
@@ -15,8 +15,7 @@ export const CROP_PRESETS = {
     targetEcMin: 1.2,
     targetEcMax: 1.8,
     targetWaterTempMin: 18,
-    targetWaterTempMax: 26,
-    targetDaysToHarvest: 35
+    targetWaterTempMax: 26
   },
   Cucumber: {
     crop: "Cucumber",
@@ -25,8 +24,7 @@ export const CROP_PRESETS = {
     targetEcMin: 1.7,
     targetEcMax: 2.0,
     targetWaterTempMin: 20,
-    targetWaterTempMax: 28,
-    targetDaysToHarvest: 45
+    targetWaterTempMax: 28
   },
   Eggplant: {
     crop: "Eggplant",
@@ -35,8 +33,7 @@ export const CROP_PRESETS = {
     targetEcMin: 2.5,
     targetEcMax: 3.5,
     targetWaterTempMin: 20,
-    targetWaterTempMax: 28,
-    targetDaysToHarvest: 65
+    targetWaterTempMax: 28
   },
   Okra: {
     crop: "Okra",
@@ -45,8 +42,7 @@ export const CROP_PRESETS = {
     targetEcMin: 2.0,
     targetEcMax: 2.4,
     targetWaterTempMin: 22,
-    targetWaterTempMax: 29,
-    targetDaysToHarvest: 50
+    targetWaterTempMax: 29
   },
   Pepper: {
     crop: "Pepper",
@@ -55,8 +51,7 @@ export const CROP_PRESETS = {
     targetEcMin: 0.8,
     targetEcMax: 1.8,
     targetWaterTempMin: 20,
-    targetWaterTempMax: 28,
-    targetDaysToHarvest: 70
+    targetWaterTempMax: 28
   }
 };
 
@@ -79,14 +74,6 @@ export function uid(prefix = "id") {
 export function todayISO(date = new Date()) {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 10);
-}
-
-export function money(value) {
-  return new Intl.NumberFormat("en-PH", {
-    style: "currency",
-    currency: "PHP",
-    maximumFractionDigits: 2
-  }).format(Number(value || 0));
 }
 
 export function number(value, digits = 1) {
@@ -133,8 +120,6 @@ export function defaultSetups(date = todayISO()) {
       targetEcMax: preset.targetEcMax,
       targetWaterTempMin: preset.targetWaterTempMin,
       targetWaterTempMax: preset.targetWaterTempMax,
-      plantingDate: date,
-      transplantDate: date,
       nutrientFormula: "Complete hydroponic nutrients",
       pumpSchedule: systemType === "Kratky" ? "No pump" : "Continuous or timed circulation",
       location: "Bohol greenhouse",
@@ -157,12 +142,6 @@ export function defaultLogs(date = todayISO()) {
       ec: 1.52,
       waterTempC: 28,
       airTempC: 32,
-      humidity: 70,
-      plantHeightCm: 18,
-      plantCount: 80,
-      mortalityCount: 1,
-      harvestWeightGrams: 0,
-      harvestSalesAmount: 0,
       rootColor: "white",
       rootSmell: "normal",
       algaeLevel: "mild",
@@ -185,12 +164,6 @@ export function defaultLogs(date = todayISO()) {
       ec: 2.04,
       waterTempC: 31,
       airTempC: 34,
-      humidity: 66,
-      plantHeightCm: 42,
-      plantCount: 24,
-      mortalityCount: 0,
-      harvestWeightGrams: 0,
-      harvestSalesAmount: 0,
       rootColor: "cream",
       rootSmell: "normal",
       algaeLevel: "mild",
@@ -234,28 +207,6 @@ export function createDefaultState(date = todayISO()) {
         createdAt: date
       }
     ],
-    costItems: [
-      {
-        id: "cost_1",
-        setupId: "setup_1",
-        date,
-        category: "nutrients",
-        description: "Masterblend top-up mix",
-        quantity: 1,
-        unit: "batch",
-        totalCost: 85
-      },
-      {
-        id: "cost_2",
-        setupId: "setup_2",
-        date,
-        category: "electricity",
-        description: "Pump allocation",
-        quantity: 1,
-        unit: "week",
-        totalCost: 120
-      }
-    ],
     reminders: [
       {
         id: "reminder_1",
@@ -294,10 +245,12 @@ export function evaluateLog(setup, log) {
     recommendations.push({ id: uid("rec"), severity, issue, likelyCause, recommendedAction, warning });
   };
 
-  const ph = Number(log.ph);
-  const ec = Number.isFinite(Number(log.ec)) ? Number(log.ec) : calculateEc(log.tdsPpm, setup.tdsScale);
-  const waterTemp = Number(log.waterTempC);
-  const waterVolume = Number(log.waterVolumeLiters);
+  const reading = (value) => value === "" || value === null || value === undefined ? Number.NaN : Number(value);
+  const ph = reading(log.ph);
+  const loggedEc = reading(log.ec);
+  const ec = Number.isFinite(loggedEc) ? loggedEc : calculateEc(log.tdsPpm, setup.tdsScale);
+  const waterTemp = reading(log.waterTempC);
+  const waterVolume = reading(log.waterVolumeLiters);
   const normalVolume = Number(setup.normalWaterVolumeLiters || setup.tankCapacityLiters || 0);
   const symptoms = new Set(log.symptoms || []);
   const pests = log.pestSigns || [];
@@ -449,6 +402,40 @@ export function evaluateLog(setup, log) {
   };
 }
 
+export function buildDiagnosisRequest(setup, log) {
+  const symptomLabels = new Map(SYMPTOMS);
+  const symptoms = (log.symptoms || []).map((id) => symptomLabels.get(id) || id);
+  const recommendations = log.recommendations?.length ? log.recommendations : evaluateLog(setup, log).recommendations;
+  const value = (input, suffix = "") =>
+    input === "" || input === null || input === undefined ? "not recorded" : `${input}${suffix}`;
+
+  return [
+    "Please visually diagnose this hydroponic plant using the attached photo and the readings below.",
+    "State the likely problem, confidence level, immediate action, and what I should check next.",
+    "",
+    `Setup: ${setup.name}`,
+    `Crop: ${setup.crop}${setup.variety ? ` (${setup.variety})` : ""}`,
+    `System: ${setup.systemType}`,
+    `Date: ${log.date}`,
+    `pH: ${value(log.ph)}`,
+    `TDS: ${value(log.tdsPpm, " ppm")}`,
+    `EC: ${value(log.ec, " mS/cm")}`,
+    `Water temperature: ${value(log.waterTempC, " C")}`,
+    `Air temperature: ${value(log.airTempC, " C")}`,
+    `Water volume: ${value(log.waterVolumeLiters, " L")}`,
+    `Root color: ${value(log.rootColor)}`,
+    `Root smell: ${value(log.rootSmell)}`,
+    `Algae: ${value(log.algaeLevel)}`,
+    `Pest signs: ${(log.pestSigns || []).join(", ") || "none recorded"}`,
+    `Symptoms: ${symptoms.join(", ") || "none selected"}`,
+    `Actions already taken: ${log.actionsTaken || "none recorded"}`,
+    `Notes: ${log.notes || "none"}`,
+    "",
+    "Current app findings:",
+    ...recommendations.map((item) => `- ${item.severity}: ${item.issue}. ${item.recommendedAction}`)
+  ].join("\n");
+}
+
 export function setupStatus(setup, logs = []) {
   const latest = latestLogForSetup(logs, setup.id);
   if (!latest) {
@@ -462,57 +449,6 @@ export function setupStatus(setup, logs = []) {
     latest,
     nextAction: result.recommendations[0]?.recommendedAction || "Monitor next weekly reading"
   };
-}
-
-export function computeFinancialSummary(state) {
-  const totals = {
-    cost: 0,
-    revenue: 0,
-    harvestKg: 0,
-    profit: 0,
-    bySetup: {}
-  };
-
-  for (const setup of state.setups || []) {
-    totals.bySetup[setup.id] = {
-      setupId: setup.id,
-      name: setup.name,
-      cost: 0,
-      revenue: 0,
-      harvestKg: 0,
-      profit: 0
-    };
-  }
-
-  for (const item of state.costItems || []) {
-    const cost = Number(item.totalCost || 0);
-    totals.cost += cost;
-    if (!totals.bySetup[item.setupId]) {
-      totals.bySetup[item.setupId] = { setupId: item.setupId, name: "Unassigned", cost: 0, revenue: 0, harvestKg: 0, profit: 0 };
-    }
-    totals.bySetup[item.setupId].cost += cost;
-  }
-
-  for (const log of state.logs || []) {
-    const revenue = Number(log.harvestSalesAmount || 0);
-    const harvestKg = Number(log.harvestWeightGrams || 0) / 1000;
-    totals.revenue += revenue;
-    totals.harvestKg += harvestKg;
-    if (!totals.bySetup[log.setupId]) {
-      totals.bySetup[log.setupId] = { setupId: log.setupId, name: "Unassigned", cost: 0, revenue: 0, harvestKg: 0, profit: 0 };
-    }
-    totals.bySetup[log.setupId].revenue += revenue;
-    totals.bySetup[log.setupId].harvestKg += harvestKg;
-  }
-
-  totals.profit = totals.revenue - totals.cost;
-  for (const row of Object.values(totals.bySetup)) {
-    row.profit = row.revenue - row.cost;
-    row.costPerKg = row.harvestKg > 0 ? row.cost / row.harvestKg : 0;
-  }
-
-  totals.costPerKg = totals.harvestKg > 0 ? totals.cost / totals.harvestKg : 0;
-  return totals;
 }
 
 export function rowsToCsv(rows, columns) {
@@ -551,17 +487,15 @@ export function exportableRows(state, kind) {
     );
   }
   if (kind === "sensors") return state.sensorReadings || [];
-  if (kind === "costs") return state.costItems || [];
   return [];
 }
 
 export function csvColumns(kind) {
   const map = {
     setups: ["id", "name", "crop", "systemType", "tankCapacityLiters", "normalWaterVolumeLiters", "tdsScale", "targetPhMin", "targetPhMax", "targetEcMin", "targetEcMax", "targetWaterTempMin", "targetWaterTempMax"],
-    logs: ["id", "setupId", "date", "waterVolumeLiters", "ph", "tdsPpm", "ec", "waterTempC", "airTempC", "humidity", "plantHeightCm", "plantCount", "mortalityCount", "harvestWeightGrams", "harvestSalesAmount", "rootColor", "rootSmell", "algaeLevel", "symptoms", "pestSigns", "actionsTaken", "notes", "photoCount"],
+    logs: ["id", "setupId", "date", "waterVolumeLiters", "ph", "tdsPpm", "ec", "waterTempC", "airTempC", "rootColor", "rootSmell", "algaeLevel", "symptoms", "pestSigns", "actionsTaken", "notes", "photoCount"],
     recommendations: ["logId", "setupId", "date", "severity", "issue", "likelyCause", "recommendedAction", "warning"],
-    sensors: ["id", "setupId", "dateTime", "ph", "tdsPpm", "ec", "waterTempC", "waterLevelLiters", "source"],
-    costs: ["id", "setupId", "date", "category", "description", "quantity", "unit", "totalCost"]
+    sensors: ["id", "setupId", "dateTime", "ph", "tdsPpm", "ec", "waterTempC", "waterLevelLiters", "source"]
   };
   return (map[kind] || []).map((key) => ({ key, header: key }));
 }
@@ -599,7 +533,7 @@ export function parseSensorCsv(text, setups = [], fallbackSetupId = "") {
 
 export function mergeState(defaultState, savedState) {
   const merged = { ...clone(defaultState), ...(savedState || {}) };
-  for (const key of ["setups", "logs", "sensorReadings", "costItems", "reminders"]) {
+  for (const key of ["setups", "logs", "sensorReadings", "reminders"]) {
     if (!Array.isArray(merged[key])) merged[key] = [];
   }
   merged.settings = { ...defaultState.settings, ...(savedState?.settings || {}) };

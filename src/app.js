@@ -1,16 +1,15 @@
 import {
   CROP_PRESETS,
   SYMPTOMS,
+  buildDiagnosisRequest,
   calculateEc,
   clone,
-  computeFinancialSummary,
   createDefaultState,
   csvColumns,
   evaluateLog,
   exportableRows,
   latestLogForSetup,
   mergeState,
-  money,
   number,
   parseSensorCsv,
   rowsToCsv,
@@ -26,7 +25,6 @@ const VIEWS = [
   ["log", "Weekly Log"],
   ["recommendations", "Actions"],
   ["sensors", "Sensors"],
-  ["costs", "Costs"],
   ["history", "History"],
   ["sync", "Sync"]
 ];
@@ -98,7 +96,6 @@ function render() {
     log: renderWeeklyLog,
     recommendations: renderRecommendations,
     sensors: renderSensors,
-    costs: renderCosts,
     history: renderHistory,
     sync: renderSync
   };
@@ -141,9 +138,9 @@ function handleClick(event) {
     render();
   }
   if (action === "delete-log") deleteLog(id);
-  if (action === "delete-cost") deleteCost(id);
   if (action === "use-sensor") useSensorAsDraft(id);
   if (action === "delete-sensor") deleteSensor(id);
+  if (action === "share-diagnosis") shareDiagnosis(id);
   if (action === "export-backup") exportBackup();
   if (action === "share-backup") shareBackup();
   if (action === "export-csv") exportCsv(actionButton.dataset.kind);
@@ -161,7 +158,6 @@ async function handleSubmit(event) {
   if (formId === "weekly-log-form") await saveWeeklyLog(form);
   if (formId === "sensor-form") await saveSensor(form);
   if (formId === "sensor-import-form") await importSensors(form);
-  if (formId === "cost-form") await saveCost(form);
   if (formId === "reminder-form") await saveReminder(form);
 }
 
@@ -193,7 +189,6 @@ function setupOptions(selectedId = selectedSetupId) {
 }
 
 function renderDashboard() {
-  const finance = computeFinancialSummary(state);
   const cards = state.setups.map((setup) => {
     const status = setupStatus(setup, state.logs);
     const latest = status.latest;
@@ -223,13 +218,14 @@ function renderDashboard() {
 
   const criticalCount = state.setups.filter((setup) => setupStatus(setup, state.logs).severity === "Critical").length;
   const warningCount = state.setups.filter((setup) => ["Warning", "Critical"].includes(setupStatus(setup, state.logs).severity)).length;
+  const photoCount = state.logs.reduce((total, log) => total + (log.photos || []).length, 0);
 
   return `
     <section class="metrics">
       <div class="metric"><span>Setups</span><strong>${state.setups.length}</strong></div>
       <div class="metric"><span>Needs Action</span><strong>${warningCount}</strong></div>
       <div class="metric danger"><span>Critical</span><strong>${criticalCount}</strong></div>
-      <div class="metric"><span>Profit</span><strong>${money(finance.profit)}</strong></div>
+      <div class="metric"><span>Plant Photos</span><strong>${photoCount}</strong></div>
     </section>
     <section class="section-head">
       <h2>Farm Status</h2>
@@ -252,8 +248,6 @@ function renderSetups() {
     normalWaterVolumeLiters: 80,
     tdsScale: 500,
     ...preset,
-    plantingDate: todayISO(),
-    transplantDate: todayISO(),
     nutrientFormula: "",
     pumpSchedule: "",
     location: "Bohol",
@@ -304,8 +298,6 @@ function renderSetups() {
         <label>EC Max<input name="targetEcMax" type="number" step="0.1" value="${formSetup.targetEcMax}" /></label>
         <label>Water Temp Min C<input name="targetWaterTempMin" type="number" step="0.1" value="${formSetup.targetWaterTempMin}" /></label>
         <label>Water Temp Max C<input name="targetWaterTempMax" type="number" step="0.1" value="${formSetup.targetWaterTempMax}" /></label>
-        <label>Planting Date<input name="plantingDate" type="date" value="${escapeAttr(formSetup.plantingDate)}" /></label>
-        <label>Transplant Date<input name="transplantDate" type="date" value="${escapeAttr(formSetup.transplantDate)}" /></label>
         <label class="span-2">Nutrient Formula<input name="nutrientFormula" value="${escapeAttr(formSetup.nutrientFormula)}" /></label>
         <label>Pump Schedule<input name="pumpSchedule" value="${escapeAttr(formSetup.pumpSchedule)}" /></label>
         <label>Location<input name="location" value="${escapeAttr(formSetup.location)}" /></label>
@@ -336,12 +328,6 @@ function renderWeeklyLog() {
         <label>TDS ppm<input name="tdsPpm" type="number" step="1" value="${draft.tdsPpm || ""}" /></label>
         <label>Water Temp C<input name="waterTempC" type="number" step="0.1" value="${draft.waterTempC || ""}" /></label>
         <label>Air Temp C<input name="airTempC" type="number" step="0.1" /></label>
-        <label>Humidity %<input name="humidity" type="number" step="1" /></label>
-        <label>Plant Height cm<input name="plantHeightCm" type="number" step="0.1" /></label>
-        <label>Plant Count<input name="plantCount" type="number" step="1" /></label>
-        <label>Mortality Count<input name="mortalityCount" type="number" step="1" value="0" /></label>
-        <label>Harvest g<input name="harvestWeightGrams" type="number" step="1" value="0" /></label>
-        <label>Sales Amount PHP<input name="harvestSalesAmount" type="number" step="0.01" value="0" /></label>
         <label>Root Color
           <select name="rootColor">
             <option>white</option><option>cream</option><option>brown</option><option>black</option>
@@ -364,8 +350,8 @@ function renderWeeklyLog() {
         </fieldset>
         <label class="span-2">Actions Taken<textarea name="actionsTaken" rows="2"></textarea></label>
         <label class="span-2">Notes<textarea name="notes" rows="2"></textarea></label>
-        <label class="span-2 file-box">Photos<input id="log-photos" name="photos" type="file" accept="image/*" capture="environment" multiple /></label>
-        <button class="btn primary span-2" type="submit">Save Log and Recommendations</button>
+        <label class="span-2 file-box">Plant Photos for Diagnosis<input id="log-photos" name="photos" type="file" accept="image/*" capture="environment" multiple /></label>
+        <button class="btn primary span-2" type="submit">Save Log and Diagnose</button>
       </form>
     </section>
   `;
@@ -375,6 +361,7 @@ function renderRecommendations() {
   const setup = selectedSetup();
   const latest = latestLogForSetup(state.logs, setup.id);
   const result = latest ? { severity: latest.recommendations?.[0]?.severity || evaluateLog(setup, latest).severity, recommendations: latest.recommendations || evaluateLog(setup, latest).recommendations } : null;
+  const latestPhoto = latest?.photos?.at(-1);
   const items = result?.recommendations?.map((rec) => `
     <article class="action-card ${rec.severity.toLowerCase()}">
       <span class="badge ${rec.severity.toLowerCase()}">${rec.severity}</span>
@@ -394,6 +381,18 @@ function renderRecommendations() {
       <div class="mini-summary">
         <span>${latest ? `Latest log: ${escapeHtml(latest.date)}` : "No log"}</span>
         <span>Targets: pH ${setup.targetPhMin}-${setup.targetPhMax}, EC ${setup.targetEcMin}-${setup.targetEcMax}</span>
+      </div>
+      <div class="diagnosis-grid">
+        <div class="diagnosis-photo">
+          ${latestPhoto
+            ? `<img src="${latestPhoto.dataUrl}" alt="${escapeAttr(latestPhoto.name || "Latest plant photo")}" />`
+            : `<div class="empty compact">No plant photo in the latest log.</div>`}
+        </div>
+        <div>
+          <h3>Photo-Assisted Diagnosis</h3>
+          <p>The findings below use your remaining readings and observations. Share the latest photo and readings to ChatGPT for visual assessment.</p>
+          <button class="btn primary" data-action="share-diagnosis" data-id="${latest?.id || ""}" type="button" ${latestPhoto ? "" : "disabled"}>Share Photo + Readings</button>
+        </div>
       </div>
       <div class="action-list">${items}</div>
       <p class="advisory">Advisory only. Verify with actual plant, root, reservoir, and pest observations before applying corrective chemicals.</p>
@@ -443,76 +442,6 @@ function renderSensors() {
               </tr>
             `).join("") || `<tr><td colspan="7">No sensor readings yet.</td></tr>`}
           </tbody>
-        </table>
-      </div>
-    </section>
-  `;
-}
-
-function renderCosts() {
-  const finance = computeFinancialSummary(state);
-  const setupRows = Object.values(finance.bySetup).map((row) => `
-    <tr>
-      <td>${escapeHtml(row.name)}</td>
-      <td>${money(row.cost)}</td>
-      <td>${money(row.revenue)}</td>
-      <td>${number(row.harvestKg, 2)} kg</td>
-      <td>${money(row.costPerKg)}</td>
-      <td class="${row.profit < 0 ? "neg" : "pos"}">${money(row.profit)}</td>
-    </tr>
-  `).join("");
-
-  const costs = [...state.costItems].sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 25).map((item) => `
-    <tr>
-      <td>${escapeHtml(item.date)}</td>
-      <td>${escapeHtml(setupById(item.setupId)?.name || "")}</td>
-      <td>${escapeHtml(item.category)}</td>
-      <td>${escapeHtml(item.description)}</td>
-      <td>${number(item.quantity, 2)} ${escapeHtml(item.unit)}</td>
-      <td>${money(item.totalCost)}</td>
-      <td><button class="btn tiny ghost" data-action="delete-cost" data-id="${item.id}" type="button">Delete</button></td>
-    </tr>
-  `).join("");
-
-  return `
-    <section class="metrics">
-      <div class="metric"><span>Total Cost</span><strong>${money(finance.cost)}</strong></div>
-      <div class="metric"><span>Revenue</span><strong>${money(finance.revenue)}</strong></div>
-      <div class="metric"><span>Harvest</span><strong>${number(finance.harvestKg, 2)} kg</strong></div>
-      <div class="metric ${finance.profit < 0 ? "danger" : ""}"><span>Profit</span><strong>${money(finance.profit)}</strong></div>
-    </section>
-    <section class="two-column">
-      <form class="panel form-grid" id="cost-form">
-        <h2 class="span-2">Cost Entry</h2>
-        <label class="span-2">Setup<select name="setupId">${setupOptions()}</select></label>
-        <label>Date<input name="date" type="date" value="${todayISO()}" /></label>
-        <label>Category
-          <select name="category">
-            <option>nutrients</option><option>pH adjuster</option><option>electricity</option><option>labor</option><option>seeds</option><option>equipment</option><option>packaging</option><option>other</option>
-          </select>
-        </label>
-        <label class="span-2">Description<input name="description" required /></label>
-        <label>Quantity<input name="quantity" type="number" step="0.01" value="1" /></label>
-        <label>Unit<input name="unit" value="batch" /></label>
-        <label class="span-2">Total Cost PHP<input name="totalCost" type="number" step="0.01" required /></label>
-        <button class="btn primary span-2" type="submit">Save Cost</button>
-      </form>
-      <div class="panel">
-        <h2>Setup Costing</h2>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Setup</th><th>Cost</th><th>Sales</th><th>Harvest</th><th>Cost/kg</th><th>Profit</th></tr></thead>
-            <tbody>${setupRows}</tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-    <section class="panel">
-      <h2>Cost History</h2>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Date</th><th>Setup</th><th>Category</th><th>Description</th><th>Qty</th><th>Cost</th><th></th></tr></thead>
-          <tbody>${costs || `<tr><td colspan="7">No cost entries yet.</td></tr>`}</tbody>
         </table>
       </div>
     </section>
@@ -577,7 +506,7 @@ function renderSync() {
           <button class="btn primary" data-action="export-backup" type="button">Export Backup</button>
           <button class="btn" data-action="share-backup" type="button">Share Backup</button>
           <label class="btn file-button">Import Backup<input id="restore-file" type="file" accept="application/json,.json" /></label>
-          ${["setups", "logs", "recommendations", "sensors", "costs"].map((kind) => `<button class="btn ghost" data-action="export-csv" data-kind="${kind}" type="button">${kind}.csv</button>`).join("")}
+          ${["setups", "logs", "recommendations", "sensors"].map((kind) => `<button class="btn ghost" data-action="export-csv" data-kind="${kind}" type="button">${kind}.csv</button>`).join("")}
         </div>
       </div>
       <form class="panel form-grid" id="reminder-form">
@@ -626,8 +555,6 @@ async function saveSetup(form) {
     targetEcMax: numeric(data.get("targetEcMax"), preset.targetEcMax),
     targetWaterTempMin: numeric(data.get("targetWaterTempMin"), preset.targetWaterTempMin),
     targetWaterTempMax: numeric(data.get("targetWaterTempMax"), preset.targetWaterTempMax),
-    plantingDate: String(data.get("plantingDate") || todayISO()),
-    transplantDate: String(data.get("transplantDate") || ""),
     nutrientFormula: String(data.get("nutrientFormula") || ""),
     pumpSchedule: String(data.get("pumpSchedule") || ""),
     location: String(data.get("location") || ""),
@@ -650,6 +577,7 @@ async function saveWeeklyLog(form) {
   const photos = await readPhotos(document.querySelector("#log-photos")?.files || []);
   const tdsPpm = numeric(data.get("tdsPpm"), "");
   const ec = calculateEc(tdsPpm, setup.tdsScale);
+  const timestamp = new Date().toISOString();
   const log = {
     id: uid("log"),
     setupId: setup.id,
@@ -660,12 +588,6 @@ async function saveWeeklyLog(form) {
     ec,
     waterTempC: numeric(data.get("waterTempC"), ""),
     airTempC: numeric(data.get("airTempC"), ""),
-    humidity: numeric(data.get("humidity"), ""),
-    plantHeightCm: numeric(data.get("plantHeightCm"), ""),
-    plantCount: numeric(data.get("plantCount"), ""),
-    mortalityCount: numeric(data.get("mortalityCount"), 0),
-    harvestWeightGrams: numeric(data.get("harvestWeightGrams"), 0),
-    harvestSalesAmount: numeric(data.get("harvestSalesAmount"), 0),
     rootColor: String(data.get("rootColor") || "white"),
     rootSmell: String(data.get("rootSmell") || "normal"),
     algaeLevel: String(data.get("algaeLevel") || "none"),
@@ -674,8 +596,8 @@ async function saveWeeklyLog(form) {
     actionsTaken: String(data.get("actionsTaken") || ""),
     notes: String(data.get("notes") || ""),
     photos,
-    createdAt: todayISO(),
-    updatedAt: todayISO()
+    createdAt: timestamp,
+    updatedAt: timestamp
   };
   log.recommendations = evaluateLog(setup, log).recommendations;
   state.logs = [...state.logs, log];
@@ -718,24 +640,6 @@ async function importSensors(form) {
   render();
 }
 
-async function saveCost(form) {
-  const data = new FormData(form);
-  const item = {
-    id: uid("cost"),
-    setupId: String(data.get("setupId")),
-    date: String(data.get("date") || todayISO()),
-    category: String(data.get("category") || "other"),
-    description: String(data.get("description") || ""),
-    quantity: numeric(data.get("quantity"), 1),
-    unit: String(data.get("unit") || ""),
-    totalCost: numeric(data.get("totalCost"), 0)
-  };
-  state.costItems = [...state.costItems, item];
-  await saveState(state);
-  toast("Cost saved");
-  render();
-}
-
 async function saveReminder(form) {
   const data = new FormData(form);
   state.reminders = [
@@ -767,13 +671,6 @@ async function seedDemo() {
 async function deleteLog(id) {
   if (!confirm("Delete this weekly log?")) return;
   state.logs = state.logs.filter((log) => log.id !== id);
-  await saveState(state);
-  render();
-}
-
-async function deleteCost(id) {
-  if (!confirm("Delete this cost item?")) return;
-  state.costItems = state.costItems.filter((item) => item.id !== id);
   await saveState(state);
   render();
 }
@@ -810,6 +707,49 @@ async function shareBackup() {
   } else {
     exportBackup();
   }
+}
+
+async function shareDiagnosis(logId) {
+  const log = state.logs.find((item) => item.id === logId);
+  const setup = log ? setupById(log.setupId) : null;
+  if (!log || !setup || !(log.photos || []).length) {
+    toast("Add a plant photo to the latest log first");
+    return;
+  }
+
+  const text = buildDiagnosisRequest(setup, log);
+  const files = [];
+  for (const [index, photo] of (log.photos || []).slice(-3).entries()) {
+    files.push(await photoFile(photo, index));
+  }
+
+  try {
+    if (navigator.canShare?.({ files })) {
+      await navigator.share({
+        title: `Plant diagnosis - ${setup.name}`,
+        text,
+        files
+      });
+      return;
+    }
+    if (navigator.share) {
+      await navigator.share({ title: `Plant diagnosis - ${setup.name}`, text });
+      return;
+    }
+    await navigator.clipboard.writeText(text);
+    toast("Diagnosis readings copied");
+  } catch (error) {
+    if (error?.name !== "AbortError") toast("Unable to open the share menu");
+  }
+}
+
+async function photoFile(photo, index) {
+  const response = await fetch(photo.dataUrl);
+  const blob = await response.blob();
+  const extension = blob.type === "image/png" ? "png" : "jpg";
+  const originalName = String(photo.name || "").replace(/[^a-z0-9._-]/gi, "_");
+  const name = originalName || `plant_${index + 1}.${extension}`;
+  return new File([blob], name, { type: blob.type || photo.type || "image/jpeg" });
 }
 
 async function importBackup(file) {

@@ -1,4 +1,4 @@
-const CACHE_NAME = "hydrocheck-ph-free-v3-cache-3";
+const CACHE_NAME = "hydrocheck-ph-free-v3-cache-4";
 const APP_SHELL = [
   "./",
   "./index.html",
