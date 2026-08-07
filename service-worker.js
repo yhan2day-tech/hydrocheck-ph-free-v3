@@ -1,15 +1,15 @@
-const CACHE_NAME = "hydrocheck-ph-free-v3-cache-4";
+const CACHE_NAME = "hydrocheck-ph-free-v3-cache-5";
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles.css",
+  "./styles.css?v=3.2.0",
   "./manifest.webmanifest",
   "./icons/icon.svg",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
-  "./src/app.js",
-  "./src/core.js",
-  "./src/storage.js"
+  "./src/app.js?v=3.2.0",
+  "./src/core.js?v=3.2.0",
+  "./src/storage.js?v=3.2.0"
 ];
 
 self.addEventListener("install", (event) => {
@@ -28,6 +28,18 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", copy));
+          return response;
+        })
+        .catch(() => caches.match("./index.html"))
+    );
+    return;
+  }
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;

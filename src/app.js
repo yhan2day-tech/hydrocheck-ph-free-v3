@@ -1,6 +1,7 @@
 import {
   CROP_PRESETS,
   SYMPTOMS,
+  buildTrendSummary,
   buildDiagnosisRequest,
   calculateEc,
   clone,
@@ -11,13 +12,16 @@ import {
   latestLogForSetup,
   mergeState,
   number,
+  normalizeHarvestSchedule,
   parseSensorCsv,
+  readingDueSetups,
   rowsToCsv,
   setupStatus,
+  summarizeHarvestSchedule,
   todayISO,
   uid
-} from "./core.js";
-import { clearState, loadState, saveState } from "./storage.js";
+} from "./core.js?v=3.2.0";
+import { clearState, loadState, saveState } from "./storage.js?v=3.2.0";
 
 const VIEWS = [
   ["dashboard", "Dashboard"],
@@ -29,6 +33,9 @@ const VIEWS = [
   ["sync", "Sync"]
 ];
 
+const HARVEST_STORAGE_KEYS = ["harvest-tracker-entries-v2", "harvestEntries"];
+const HARVEST_TRACKER_URL = "https://yhan2day-tech.github.io/harvest-tracker/";
+
 const app = document.querySelector("#app");
 const nav = document.querySelector("#nav");
 const installButton = document.querySelector("#install-button");
@@ -36,6 +43,8 @@ let state = createDefaultState();
 let activeView = "dashboard";
 let selectedSetupId = "";
 let editingSetupId = "";
+let dashboardWeeks = 8;
+let harvestSchedule = [];
 let draftSensor = null;
 let deferredInstallPrompt = null;
 
@@ -46,6 +55,7 @@ async function boot() {
   if (!state.setups.length) state = createDefaultState();
   selectedSetupId = state.setups[0]?.id || "";
   editingSetupId = selectedSetupId;
+  harvestSchedule = loadHarvestSchedule();
   refreshSavedRecommendations();
   renderNav();
   render();
@@ -66,6 +76,11 @@ function bindGlobalEvents() {
   document.addEventListener("click", handleClick);
   document.addEventListener("submit", handleSubmit);
   document.addEventListener("change", handleChange);
+  window.addEventListener("storage", (event) => {
+    if (!HARVEST_STORAGE_KEYS.includes(event.key)) return;
+    harvestSchedule = loadHarvestSchedule();
+    if (activeView === "dashboard") render();
+  });
 
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
@@ -137,6 +152,7 @@ function handleClick(event) {
     activeView = "recommendations";
     render();
   }
+  if (action === "open-harvest") window.location.href = HARVEST_TRACKER_URL;
   if (action === "delete-log") deleteLog(id);
   if (action === "use-sensor") useSensorAsDraft(id);
   if (action === "delete-sensor") deleteSensor(id);
@@ -171,6 +187,16 @@ async function handleChange(event) {
     render();
   }
 
+  if (target.matches("[data-dashboard-setup]")) {
+    selectedSetupId = target.value;
+    render();
+  }
+
+  if (target.matches("[data-dashboard-weeks]")) {
+    dashboardWeeks = Number(target.value) || 8;
+    render();
+  }
+
   if (target.id === "restore-file") {
     await importBackup(target.files?.[0]);
   }
@@ -189,50 +215,224 @@ function setupOptions(selectedId = selectedSetupId) {
 }
 
 function renderDashboard() {
-  const cards = state.setups.map((setup) => {
-    const status = setupStatus(setup, state.logs);
-    const latest = status.latest;
-    return `
-      <article class="setup-card status-${status.severity.toLowerCase()}">
-        <div class="card-head">
-          <div>
-            <h3>${escapeHtml(setup.name)}</h3>
-            <p>${escapeHtml(setup.crop)} / ${escapeHtml(setup.systemType)}</p>
-          </div>
-          <span class="badge ${status.severity.toLowerCase()}">${status.severity}</span>
-        </div>
-        <div class="reading-grid">
-          <span><b>${latest ? number(latest.ph, 2) : "-"}</b><small>pH</small></span>
-          <span><b>${latest ? number(latest.ec, 2) : "-"}</b><small>EC</small></span>
-          <span><b>${latest ? number(latest.waterTempC, 1) : "-"}</b><small>Water C</small></span>
-          <span><b>${latest ? number(latest.waterVolumeLiters, 0) : "-"}</b><small>Liters</small></span>
-        </div>
-        <p class="next-action">${escapeHtml(status.nextAction)}</p>
-        <div class="card-actions">
-          <button class="btn small" data-action="open-log" data-id="${setup.id}" type="button">Log</button>
-          <button class="btn small ghost" data-action="open-actions" data-id="${setup.id}" type="button">Actions</button>
-        </div>
-      </article>
-    `;
-  }).join("");
-
-  const criticalCount = state.setups.filter((setup) => setupStatus(setup, state.logs).severity === "Critical").length;
-  const warningCount = state.setups.filter((setup) => ["Warning", "Critical"].includes(setupStatus(setup, state.logs).severity)).length;
-  const photoCount = state.logs.reduce((total, log) => total + (log.photos || []).length, 0);
+  const setup = selectedSetup();
+  const setupLogs = state.logs.filter((log) => log.setupId === setup.id);
+  const dueReadings = readingDueSetups(state.setups, state.logs);
+  const harvest = summarizeHarvestSchedule(harvestSchedule);
+  const needsAction = state.setups.filter((item) => {
+    const latest = latestLogForSetup(state.logs, item.id);
+    return latest && ["Warning", "Critical"].includes(evaluateLog(item, latest).severity);
+  });
+  const actions = dashboardActions(dueReadings, harvest);
+  const latestDate = [...state.logs].map((log) => log.date).filter(Boolean).sort().at(-1);
 
   return `
-    <section class="metrics">
-      <div class="metric"><span>Setups</span><strong>${state.setups.length}</strong></div>
-      <div class="metric"><span>Needs Action</span><strong>${warningCount}</strong></div>
-      <div class="metric danger"><span>Critical</span><strong>${criticalCount}</strong></div>
-      <div class="metric"><span>Plant Photos</span><strong>${photoCount}</strong></div>
+    <section class="dashboard-controls" aria-label="Dashboard filters">
+      <label>Setup<select data-dashboard-setup>${setupOptions(setup.id)}</select></label>
+      <label>Trend period
+        <select data-dashboard-weeks>
+          ${[4, 8, 12].map((weeks) => `<option value="${weeks}" ${weeks === dashboardWeeks ? "selected" : ""}>${weeks} weeks</option>`).join("")}
+        </select>
+      </label>
     </section>
-    <section class="section-head">
-      <h2>Farm Status</h2>
-      <button class="btn" data-action="new-setup" type="button">New Setup</button>
+
+    <section class="status-strip" aria-label="Weekly operating status">
+      ${statusMetric("Needs action", needsAction.length, needsAction.some((item) => evaluateLog(item, latestLogForSetup(state.logs, item.id)).severity === "Critical") ? "critical" : needsAction.length ? "warning" : "good", `${state.setups.length} setups checked`)}
+      ${statusMetric("Readings due", dueReadings.length, dueReadings.length ? "warning" : "good", "Weekly check every 7 days")}
+      ${statusMetric("Harvests next 7 days", harvest.dueToday.length + harvest.nextSevenDays.length, harvest.dueToday.length ? "warning" : "good", harvest.overdue.length ? `${harvest.overdue.length} overdue` : "No overdue schedule")}
     </section>
-    <section class="setup-grid">${cards}</section>
+
+    <section class="dashboard-section-head">
+      <div>
+        <h2>Weekly trends</h2>
+        <p>${escapeHtml(setup.crop)} / ${escapeHtml(setup.name)} / ${dashboardWeeks} weeks</p>
+      </div>
+      <button class="btn small" data-action="open-log" data-id="${setup.id}" type="button">Add reading</button>
+    </section>
+    <section class="trend-dashboard-grid">
+      ${dashboardTrendCard(setupLogs, "ph", "pH", "", setup.targetPhMin, setup.targetPhMax, 2)}
+      ${dashboardTrendCard(setupLogs, "ec", "EC", "mS/cm", setup.targetEcMin, setup.targetEcMax, 2)}
+      ${dashboardTrendCard(setupLogs, "waterTempC", "Water temp", "C", setup.targetWaterTempMin, setup.targetWaterTempMax, 1)}
+    </section>
+
+    <section class="operating-panel">
+      <div class="dashboard-section-head compact">
+        <div>
+          <h2>Priority crop actions</h2>
+          <p>Highest-risk work first</p>
+        </div>
+        <button class="btn small ghost" data-action="open-actions" data-id="${setup.id}" type="button">All actions</button>
+      </div>
+      <div class="operation-list">${actions.length ? actions.slice(0, 6).map(renderDashboardAction).join("") : `<div class="empty compact">No urgent action from the latest readings or harvest schedule.</div>`}</div>
+    </section>
+
+    <section class="operating-panel harvest-panel">
+      <div class="dashboard-section-head compact">
+        <div>
+          <h2>Harvest outlook</h2>
+          <p>Expected dates from the separate Harvest Tracker app</p>
+        </div>
+        <button class="btn small" data-action="open-harvest" type="button">Open tracker</button>
+      </div>
+      ${harvestSchedule.length ? `
+        ${harvestLoadBars(harvest.scheduled)}
+        <div class="harvest-columns">
+          ${harvestGroup("Overdue", harvest.overdue, "None overdue", "critical")}
+          ${harvestGroup("Due today", harvest.dueToday, "None today", "warning")}
+          ${harvestGroup("Next 7 days", harvest.nextSevenDays, "None scheduled", "good")}
+        </div>
+      ` : `<div class="empty harvest-empty">No Harvest Tracker dates found in this browser. Open Harvest Tracker and add transplants; they will appear here automatically.</div>`}
+    </section>
+
+    <p class="dashboard-freshness">Readings through ${latestDate ? formatDashboardDate(latestDate) : "no saved date"}. Data stays on this device; Harvest Tracker remains a separate app.</p>
   `;
+}
+
+function statusMetric(label, value, tone, detail) {
+  return `<div class="status-metric ${tone}"><strong>${value}</strong><span>${escapeHtml(label)}</span><small>${escapeHtml(detail)}</small></div>`;
+}
+
+function dashboardTrendCard(logs, field, label, unit, targetMin, targetMax, digits) {
+  const trend = buildTrendSummary(logs, field, targetMin, targetMax, dashboardWeeks);
+  const delta = trend.delta === null ? "No prior reading" : `${trend.delta > 0 ? "+" : ""}${number(trend.delta, digits)} since last`;
+  const statusLabel = trend.targetStatus === "good" ? "In target" : trend.targetStatus === "low" ? "Below target" : trend.targetStatus === "high" ? "Above target" : "No reading";
+  return `
+    <article class="trend-panel status-${trend.targetStatus}">
+      <div class="trend-heading">
+        <div><h3>${escapeHtml(label)}</h3><small>Target ${number(targetMin, digits)}-${number(targetMax, digits)}${unit ? ` ${escapeHtml(unit)}` : ""}</small></div>
+        <div class="trend-latest"><strong>${trend.latest === null ? "-" : number(trend.latest, digits)}</strong><small>${escapeHtml(unit)}</small></div>
+      </div>
+      ${trend.points.length >= 2 ? trendChartSvg(trend.points, targetMin, targetMax, label, digits) : `<div class="trend-empty">Add another weekly reading to show movement.</div>`}
+      <div class="trend-foot"><span class="target-state ${trend.targetStatus}">${statusLabel}</span><span>${escapeHtml(delta)} / ${trend.points.length} records</span></div>
+    </article>
+  `;
+}
+
+function trendChartSvg(points, targetMin, targetMax, label, digits) {
+  const width = 360;
+  const height = 150;
+  const padX = 34;
+  const padY = 18;
+  const values = points.map((point) => point.value);
+  const low = Math.min(...values, Number(targetMin));
+  const high = Math.max(...values, Number(targetMax));
+  const padding = Math.max((high - low) * 0.18, label === "pH" ? 0.2 : 0.5);
+  const min = low - padding;
+  const max = high + padding;
+  const range = max - min || 1;
+  const x = (index) => padX + (index / Math.max(1, points.length - 1)) * (width - padX * 2);
+  const y = (value) => height - padY - ((value - min) / range) * (height - padY * 2);
+  const targetTop = y(Number(targetMax));
+  const targetBottom = y(Number(targetMin));
+  const polyline = points.map((point, index) => `${x(index)},${y(point.value)}`).join(" ");
+  const firstDate = formatDashboardDate(points[0].date, { month: "short", day: "numeric" });
+  const lastDate = formatDashboardDate(points.at(-1).date, { month: "short", day: "numeric" });
+  return `
+    <svg class="trend-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeAttr(label)} trend from ${escapeAttr(firstDate)} to ${escapeAttr(lastDate)}">
+      <rect class="target-band" x="${padX}" y="${targetTop}" width="${width - padX * 2}" height="${Math.max(2, targetBottom - targetTop)}" />
+      ${[0, 0.5, 1].map((ratio) => {
+        const lineY = padY + ratio * (height - padY * 2);
+        const lineValue = max - ratio * range;
+        return `<line class="chart-grid-line" x1="${padX}" y1="${lineY}" x2="${width - padX}" y2="${lineY}" /><text x="2" y="${lineY + 4}">${number(lineValue, digits)}</text>`;
+      }).join("")}
+      <line class="target-line" x1="${padX}" y1="${targetTop}" x2="${width - padX}" y2="${targetTop}" />
+      <line class="target-line" x1="${padX}" y1="${targetBottom}" x2="${width - padX}" y2="${targetBottom}" />
+      <polyline class="trend-line" points="${polyline}" />
+      ${points.map((point, index) => `<circle class="trend-point" cx="${x(index)}" cy="${y(point.value)}" r="3.5"><title>${escapeHtml(formatDashboardDate(point.date))}: ${number(point.value, digits)}</title></circle>`).join("")}
+      <text class="date-label" x="${padX}" y="${height - 1}">${escapeHtml(firstDate)}</text>
+      <text class="date-label end" x="${width - padX}" y="${height - 1}">${escapeHtml(lastDate)}</text>
+    </svg>
+  `;
+}
+
+function dashboardActions(dueReadings, harvest) {
+  const score = { Critical: 3, Warning: 2, Watch: 1, Good: 0 };
+  const actions = [];
+  for (const setup of state.setups) {
+    const latest = latestLogForSetup(state.logs, setup.id);
+    if (latest) {
+      const recommendations = evaluateLog(setup, latest).recommendations;
+      recommendations.filter((item) => item.severity !== "Good").slice(0, 2).forEach((item) => actions.push({
+        severity: item.severity,
+        title: item.issue,
+        context: `${setup.crop} / ${setup.name}`,
+        detail: item.recommendedAction,
+        action: "open-actions",
+        setupId: setup.id,
+        button: "Review"
+      }));
+    }
+  }
+  dueReadings.forEach(({ setup, ageDays }) => actions.push({
+    severity: "Watch",
+    title: ageDays === null ? "First weekly reading is due" : `Weekly reading is ${Math.max(0, ageDays - 6)} day${ageDays - 6 === 1 ? "" : "s"} overdue`,
+    context: `${setup.crop} / ${setup.name}`,
+    detail: "Record pH, EC, and reservoir temperature before making nutrient changes.",
+    action: "open-log",
+    setupId: setup.id,
+    button: "Log now"
+  }));
+  [...harvest.overdue, ...harvest.dueToday].forEach((entry) => actions.push({
+    severity: entry.daysLeft < 0 ? "Critical" : "Warning",
+    title: entry.daysLeft < 0 ? "Harvest date overdue" : "Harvest due today",
+    context: `${entry.greenhouseName} / ${entry.row}`,
+    detail: `Expected harvest ${formatDashboardDate(entry.harvestDate)}. Inspect crop readiness and update the separate Harvest Tracker schedule.`,
+    action: "open-harvest",
+    setupId: "",
+    button: "Open tracker"
+  }));
+  return actions.sort((a, b) => score[b.severity] - score[a.severity] || a.context.localeCompare(b.context));
+}
+
+function renderDashboardAction(item) {
+  return `
+    <article class="operation-row">
+      <span class="badge ${item.severity.toLowerCase()}">${escapeHtml(item.severity)}</span>
+      <div class="operation-copy"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.context)}</small><p>${escapeHtml(item.detail)}</p></div>
+      <button class="btn small ${item.severity === "Critical" ? "primary" : "ghost"}" data-action="${item.action}" ${item.setupId ? `data-id="${escapeAttr(item.setupId)}"` : ""} type="button">${escapeHtml(item.button)}</button>
+    </article>
+  `;
+}
+
+function harvestLoadBars(entries) {
+  const today = new Date();
+  const buckets = [0, 1, 2, 3].map((week) => {
+    const start = new Date(today);
+    start.setDate(start.getDate() + week * 7);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    const count = entries.filter((entry) => entry.daysLeft >= week * 7 && entry.daysLeft <= week * 7 + 6).length;
+    return { label: week === 0 ? "This week" : formatDashboardDate(todayISO(start), { month: "short", day: "numeric" }), count };
+  });
+  const max = Math.max(1, ...buckets.map((bucket) => bucket.count));
+  return `<div class="harvest-load" aria-label="Expected harvest load for four weeks">${buckets.map((bucket) => `<div><span>${escapeHtml(bucket.label)}</span><i style="--bar:${Math.max(4, (bucket.count / max) * 100)}%"></i><strong>${bucket.count}</strong></div>`).join("")}</div>`;
+}
+
+function harvestGroup(title, entries, emptyText, tone) {
+  return `
+    <div class="harvest-group ${tone}">
+      <div class="harvest-group-head"><h3>${escapeHtml(title)}</h3><strong>${entries.length}</strong></div>
+      ${entries.slice(0, 3).map((entry) => `<div class="harvest-item"><b>${escapeHtml(entry.greenhouseName)} / ${escapeHtml(entry.row)}</b><span>${formatDashboardDate(entry.harvestDate)}${entry.daysLeft > 0 ? ` / ${entry.daysLeft} day${entry.daysLeft === 1 ? "" : "s"}` : entry.daysLeft < 0 ? ` / ${Math.abs(entry.daysLeft)} day${entry.daysLeft === -1 ? "" : "s"} late` : ""}</span></div>`).join("") || `<p class="harvest-none">${escapeHtml(emptyText)}</p>`}
+    </div>
+  `;
+}
+
+function formatDashboardDate(value, options = { month: "short", day: "numeric", year: "numeric" }) {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+  if (!parts) return String(value || "-");
+  return new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3])).toLocaleDateString("en-US", options);
+}
+
+function loadHarvestSchedule() {
+  for (const key of HARVEST_STORAGE_KEYS) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) return normalizeHarvestSchedule(JSON.parse(raw));
+    } catch {
+      // A broken legacy value should not stop HydroCheck from loading.
+    }
+  }
+  return [];
 }
 
 function renderSetups() {

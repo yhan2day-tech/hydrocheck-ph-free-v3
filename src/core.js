@@ -1,4 +1,4 @@
-export const APP_VERSION = "3.1.0-free";
+export const APP_VERSION = "3.2.0-free";
 
 export const SEVERITY_SCORE = {
   Good: 0,
@@ -448,6 +448,91 @@ export function setupStatus(setup, logs = []) {
     severity: result.severity,
     latest,
     nextAction: result.recommendations[0]?.recommendedAction || "Monitor next weekly reading"
+  };
+}
+
+function isoDayNumber(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+  if (!match) return null;
+  const day = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isFinite(day) ? day : null;
+}
+
+export function daysFromToday(value, today = new Date()) {
+  const day = isoDayNumber(value);
+  if (day === null) return null;
+  const todayDay = isoDayNumber(todayISO(today));
+  return Math.round((day - todayDay) / 86400000);
+}
+
+export function buildTrendSummary(logs, field, targetMin, targetMax, weeks = 8, today = new Date()) {
+  const cutoff = isoDayNumber(todayISO(today)) - Math.max(1, Number(weeks) || 8) * 7 * 86400000;
+  const points = (Array.isArray(logs) ? logs : [])
+    .map((log) => ({
+      date: String(log?.date || ""),
+      value: log?.[field] === "" || log?.[field] === null || log?.[field] === undefined ? null : Number(log[field])
+    }))
+    .filter((point) => {
+      const day = isoDayNumber(point.date);
+      return day !== null && day >= cutoff && Number.isFinite(point.value);
+    })
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const latest = points.at(-1)?.value ?? null;
+  const previous = points.at(-2)?.value ?? null;
+  const delta = latest !== null && previous !== null ? latest - previous : null;
+  const min = Number(targetMin);
+  const max = Number(targetMax);
+  const hasTarget = Number.isFinite(min) && Number.isFinite(max);
+  const targetStatus = latest === null || !hasTarget ? "unknown" : latest < min ? "low" : latest > max ? "high" : "good";
+  const inRangeCount = hasTarget ? points.filter((point) => point.value >= min && point.value <= max).length : 0;
+
+  return {
+    points,
+    latest,
+    previous,
+    delta,
+    targetStatus,
+    inRangeCount,
+    inRangeRate: points.length && hasTarget ? inRangeCount / points.length : null
+  };
+}
+
+export function readingDueSetups(setups, logs, today = new Date(), intervalDays = 7) {
+  return (Array.isArray(setups) ? setups : []).map((setup) => {
+    const latest = latestLogForSetup(logs, setup.id);
+    const dayOffset = latest ? daysFromToday(latest.date, today) : null;
+    const ageDays = dayOffset === null ? null : -dayOffset;
+    const due = !latest || ageDays === null || ageDays >= intervalDays;
+    return { setup, latest, ageDays, due };
+  }).filter((item) => item.due);
+}
+
+export function normalizeHarvestSchedule(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry) => entry && entry.harvestDate)
+    .map((entry, index) => ({
+      id: String(entry.id || `harvest_${index + 1}`),
+      greenhouseName: String(entry.greenhouseName || entry.greenhouseKey || "Greenhouse"),
+      row: String(entry.row || entry.location || "Location"),
+      plantingDate: String(entry.plantingDate || entry.transplantingDate || ""),
+      harvestDate: String(entry.harvestDate)
+    }))
+    .filter((entry) => isoDayNumber(entry.harvestDate) !== null)
+    .sort((a, b) => a.harvestDate.localeCompare(b.harvestDate));
+}
+
+export function summarizeHarvestSchedule(entries, today = new Date()) {
+  const scheduled = normalizeHarvestSchedule(entries).map((entry) => ({
+    ...entry,
+    daysLeft: daysFromToday(entry.harvestDate, today)
+  }));
+  return {
+    scheduled,
+    overdue: scheduled.filter((entry) => entry.daysLeft < 0),
+    dueToday: scheduled.filter((entry) => entry.daysLeft === 0),
+    nextSevenDays: scheduled.filter((entry) => entry.daysLeft > 0 && entry.daysLeft <= 7)
   };
 }
 

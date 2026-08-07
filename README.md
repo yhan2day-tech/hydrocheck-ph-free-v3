@@ -7,6 +7,10 @@ HydroCheck PH Free V3 is a no-cost, offline-first hydroponics monitoring PWA for
 - Five starter hydroponics setups
 - Weekly logs for water volume, pH, TDS, computed EC, water temperature, roots, pests, symptoms, notes, and plant photos
 - Rule-based corrective recommendations
+- Eight-week pH, EC, and reservoir-temperature trends with crop target bands
+- Operating alerts for out-of-range readings and overdue weekly checks
+- Priority crop actions ordered by risk
+- A four-week harvest load and seven-day outlook read from the separate Harvest Tracker app on the same browser
 - Android sharing of the latest plant photo and readings for visual diagnosis in ChatGPT
 - Sensor readings by manual entry or CSV import
 - Reminders and browser notifications while the app is allowed to run
@@ -16,9 +20,9 @@ HydroCheck PH Free V3 is a no-cost, offline-first hydroponics monitoring PWA for
 ## Run locally
 
 ```powershell
-cd B:\PERSONAL\HYDROPONICS\hydrocheck-ph-free-v3
+cd B:\PERSONAL\HYDROPONICS\hydrocheck-ph-free-v3-github-pages-upload
 npm test
-npm run serve
+python -m http.server 5175
 ```
 
 Open:
